@@ -1,0 +1,58 @@
+package click.vpzom.netpad3android
+
+import android.util.Log
+import android.util.SparseBooleanArray
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.widget.EditText
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetSocketAddress
+import java.net.SocketAddress
+import java.util.*
+
+class NetpadHandler(device: InputDevice, val addressField: EditText) {
+    private val buttons : SparseBooleanArray = SparseBooleanArray()
+    private val axes : MutableMap<InputDevice.MotionRange, Int> = HashMap()
+
+    private val socket : DatagramSocket
+
+    init {
+        val startKey = KeyEvent.KEYCODE_0
+        val endKey = KeyEvent.getMaxKeyCode()
+        val allKeys = IntArray(endKey - startKey) { i -> startKey + i }
+        val result = device.hasKeys(*allKeys)
+        result.mapIndexed { index, found -> index * 2 + if (found) 1 else 0 }
+                .filter { it % 2 == 1 }
+                .map { it / 2 }
+                .forEach { buttons.put(it, false) }
+
+        device.motionRanges
+                .forEach { axes.put(it, 0) }
+
+        socket = DatagramSocket()
+    }
+
+    private fun send() {
+        var buttonValue = Math.pow(2.0, buttons.size().toDouble())
+        (0..buttons.size()-1).forEach {
+            if (buttons.valueAt(it)) {
+                buttonValue += Math.pow(2.0, it.toDouble())
+            }
+        }
+        val msg = axes.values.joinToString(",") + ";" + buttonValue.toInt()
+        Log.i("NPHandler", msg)
+
+        val data = msg.toByteArray()
+        socket.send(DatagramPacket(data, data.size, InetSocketAddress(addressField.text.toString(), 6723)))
+    }
+
+    fun handleMotion(event: MotionEvent) {
+        println("{Handling motion")
+        axes.keys.forEach {
+            axes[it] = ((event.getAxisValue(it.axis) - it.min) / (it.max - it.min) * 65535 - 32767).toInt()
+        }
+        send()
+    }
+}
