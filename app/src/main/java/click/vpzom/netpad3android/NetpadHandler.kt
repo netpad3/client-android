@@ -13,10 +13,11 @@ import java.net.SocketAddress
 import java.util.*
 
 class NetpadHandler(device: InputDevice, val addressField: EditText) {
-    private val buttons : SparseBooleanArray = SparseBooleanArray()
-    private val axes : MutableMap<InputDevice.MotionRange, Int> = HashMap()
+    private val buttons: SparseBooleanArray = SparseBooleanArray()
+    private val axes: MutableMap<InputDevice.MotionRange, Int> = HashMap()
 
-    private val socket : DatagramSocket
+    private val socket: DatagramSocket
+    private val thread: Thread
 
     init {
         val startKey = KeyEvent.KEYCODE_0
@@ -32,20 +33,36 @@ class NetpadHandler(device: InputDevice, val addressField: EditText) {
                 .forEach { axes.put(it, 0) }
 
         socket = DatagramSocket()
+        thread = Thread {
+            while(true) {
+                val data = msg?.toByteArray()
+                if (data != null) {
+                    synchronized(msg!!) {
+                        try {
+                            socket.send(DatagramPacket(data, data.size, InetSocketAddress(addressField.text.toString(), 6723)))
+                        } catch(ex: Exception) {
+                            Log.w("NPHandler", ex)
+                        }
+                        msg = null
+                    }
+                }
+                Thread.sleep(0)
+            }
+        }
+        thread.start()
     }
+
+    private var msg: String? = null
 
     private fun send() {
         var buttonValue = Math.pow(2.0, buttons.size().toDouble())
-        (0..buttons.size()-1).forEach {
+        (0..buttons.size() - 1).forEach {
             if (buttons.valueAt(it)) {
                 buttonValue += Math.pow(2.0, it.toDouble())
             }
         }
-        val msg = axes.values.joinToString(",") + ";" + buttonValue.toInt()
+        msg = axes.values.joinToString(",") + ";" + buttonValue.toInt().toString(16)
         Log.i("NPHandler", msg)
-
-        val data = msg.toByteArray()
-        socket.send(DatagramPacket(data, data.size, InetSocketAddress(addressField.text.toString(), 6723)))
     }
 
     fun handleMotion(event: MotionEvent) {
@@ -53,6 +70,13 @@ class NetpadHandler(device: InputDevice, val addressField: EditText) {
         axes.keys.forEach {
             axes[it] = ((event.getAxisValue(it.axis) - it.min) / (it.max - it.min) * 65535 - 32767).toInt()
         }
+        send()
+    }
+
+    fun handleKey(event: KeyEvent, value: Boolean) {
+        println("key "+event.keyCode)
+        println("{Handling key")
+        buttons.put(event.keyCode, value)
         send()
     }
 }
